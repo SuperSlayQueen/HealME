@@ -1,13 +1,14 @@
 /* HEALME ServiceWorker
  * Кэширует оболочку приложения и позволяет открыть интерфейс без сети.
  */
-const CACHE = 'healme-shell-v1';
+const CACHE = 'healme-shell-v2';
 const APP_SHELL = [
   './',
   './index.html',
   './css/styles.css',
   './js/app.js',
   './js/data.js',
+  './js/db.js',
   './js/shared-worker.js',
   './assets/logo-dark.png',
   './assets/logo-white.png'

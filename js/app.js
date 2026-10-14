@@ -4,45 +4,19 @@ const P = window.PSY, TIMES = window.TIMES, OPT = window.OPT;
 const app = document.getElementById('app'), modal = document.getElementById('modal');
 const $ = (s, r = document) => r.querySelector(s);
 
-/* ---------- хранилище ---------- */
-const ls = {
-  get(k, d) { try { const v = JSON.parse(localStorage.getItem('hm.' + k)); return v == null ? d : v; } catch (e) { return d; } },
-  set(k, v) {
-    try { localStorage.setItem('hm.' + k, JSON.stringify(v)); } catch (e) {}
-    if (window.HM_SHARED_WORKER) {
-      try { window.HM_SHARED_WORKER.port.postMessage({ type: 'sync', key: k, value: v }); } catch (e) {}
-    }
-  }
-};
+/* ---------- хранилище: IndexedDB (см. js/db.js) ---------- */
+const DB = window.HM_DB;
 
-/* ---------- SharedWorker: синхронизация состояния между вкладками ---------- */
-const sharedWorkerReady = 'SharedWorker' in window;
-if (sharedWorkerReady) {
-  try {
-    const worker = new SharedWorker('js/shared-worker.js', { name: 'healme-state' });
-    worker.port.start();
-    worker.port.onmessage = e => {
-      const m = e.data || {};
-      if (m.type === 'state' && m.key) {
-        try { localStorage.setItem('hm.' + m.key, JSON.stringify(m.value)); } catch (err) {}
-        if (m.key === 'b') render(false);
-      }
-    };
-    window.HM_SHARED_WORKER = worker;
-    worker.port.postMessage({ type: 'hello', key: 'b', value: ls.get('b', []) });
-  } catch (e) {
-    console.warn('SharedWorker недоступен:', e);
-  }
-}
-
-const bookings = () => ls.get('b', []);
-const saveB = a => ls.set('b', a);
+const bookings = () => DB.get('b', []);
+const saveB = a => DB.set('b', a);
 const pad = n => String(n).padStart(2, '0');
 const key = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-if (!ls.get('init', 0)) { // демо-запись в прошлом, чтобы можно было оставить отзыв
+function seedDemo() { // демо-запись в прошлом, чтобы можно было оставить отзыв
+  if (DB.get('init', 0)) return;
+  if (bookings().length) { DB.set('init', 1); return; } // данные уже есть (например, после миграции) — не затираем
   const d = new Date(); d.setDate(d.getDate() - 5);
   saveB([{ id: 'demo1', pid: 'maria', day: key(d), t: '18:00', name: 'Демо', mail: 'demo@example.com', st: 'ok', moves: 0 }]);
-  ls.set('init', 1);
+  DB.set('init', 1);
 }
 
 /* ---------- даты и слоты ---------- */
@@ -315,7 +289,7 @@ document.addEventListener('click', e => {
     else location.hash = '#/form/' + D.pid;
   }
   else if (a === 'submit') submitForm();
-  else if (a === 'wait') { const w = ls.get('w', []); w.push({ pid: D.pid, day: D.day, t: D.t }); ls.set('w', w); D = {}; location.hash = '#/done/wait'; }
+  else if (a === 'wait') { const w = DB.get('w', []); w.push({ pid: D.pid, day: D.day, t: D.t }); DB.set('w', w); D = {}; location.hash = '#/done/wait'; }
   else if (a === 'ics') ics(bookings().find(b => b.id === v));
   else if (a === 'rate') { RV.txt = $('#rtx') ? $('#rtx').value : RV.txt; RV.r = +v; render(true); }
   else if (a === 'send-review') {
@@ -326,14 +300,15 @@ document.addEventListener('click', e => {
   else if (a === 'cancel-ask') openModal(`<h3>Отменить запись?</h3><p class="mut">Время освободится для других клиентов.</p><button class="btn lm" data-act="close">Оставить запись</button><button class="btn ol" data-act="cancel-yes" data-v="${v}">Да, отменить</button>`);
   else if (a === 'cancel-yes') { const arr = bookings(), b = arr.find(x => x.id === v); b.st = 'cancelled'; saveB(arr); location.hash = '#/done/cancelled?b=' + v; }
   else if (a === 'del-ask') openModal(`<h3>Удалить все данные?</h3><p class="mut">Записи, заявки и отзывы будут стёрты с этого устройства. Это нельзя отменить.</p><button class="btn lm" data-act="close">Отмена</button><button class="btn ol" data-act="del-yes">Да, удалить</button>`);
-  else if (a === 'del-yes') { saveB([]); ls.set('w', []); D = {}; render(false); }
+  else if (a === 'del-yes') { saveB([]); DB.set('w', []); D = {}; render(false); }
 });
 document.addEventListener('input', e => { if (e.target.closest('.fld.er') && e.target.matches('input,textarea')) { const f = e.target.closest('.fld'); f.classList.remove('er'); const m = $('.em', f); if (m) m.textContent = ''; } });
 document.addEventListener('click', e => { if (F.open && !e.target.closest('.dw')) { F.open = ''; if (location.hash.indexOf('/psychologists') > 0) render(true); } }, true);
 
-window.addEventListener('storage', e => {
-  if (e.key === 'hm.b') render(false);
+// Первый рендер — после готовности IndexedDB (миграция и чтение данных асинхронные).
+DB.ready.then(() => {
+  seedDemo();
+  DB.onChange(k => { if (k === 'b') render(false); }); // запись изменилась в другой вкладке
+  render(false);
 });
-
-render(false);
 })();
