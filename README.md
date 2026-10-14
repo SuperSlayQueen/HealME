@@ -1,6 +1,6 @@
 # HEALME — сервис записи к психологам (демо на JavaScript)
 
-Без сборки и зависимостей: чистые HTML, CSS и JS. Данные хранятся в `localStorage`.
+Без сборки и зависимостей: чистые HTML, CSS и JS. Данные хранятся в **IndexedDB** (с миграцией со старого localStorage).
 
 ## Запуск
 Откройте `index.html` двойным щелчком или запустите Live Server в VS Code. Для публикации подойдёт GitHub Pages.
@@ -39,16 +39,15 @@
 
 ## Новые технологии
 
-- `js/shared-worker.js` — SharedWorker для синхронизации состояния записей между вкладками.
+- `js/db.js` — хранилище на IndexedDB (база `healme`): записи и лист ожидания живут в базе, кэш в памяти нужен для синхронного рендера. Старые данные из localStorage переносятся автоматически. Синхронизация вкладок — SharedWorker, резерв — BroadcastChannel.
 - `sw.js` — ServiceWorker для кэширования оболочки приложения и работы без сети.
-- `mcp/` — MCP-сервер для браузерного и AI-тестирования HEALME через Playwright.
+- `mcp/` — MCP-сервер: браузерная диагностика HEALME и **бронирование слотов у психологов** (`list_psychologists`, `get_free_slots`, `book_slot`, `list_bookings`) через реальный интерфейс приложения.
 
 ### Быстрая проверка
 
-1. Запустить сайт через HTTP, например `python -m http.server 5500`.
-2. Открыть `http://127.0.0.1:5500/`.
-3. Для MCP перейти в `mcp`, выполнить `npm install` и `npx playwright install chromium`.
-4. Выполнить `npm test`.
-5. Для AI-проверки задать `OPENAI_API_KEY` и подключить `mcp/server.js` к MCP-клиенту.
+1. Запустить сайт: `python server.py` (откроется на `http://127.0.0.1:5500/`).
+2. Для MCP перейти в `mcp`, выполнить `npm install` и `npx playwright install chromium`.
+3. Выполнить `npm test` — smoke-тест сайта, e2e-тест бронирования и интеграционный тест MCP-сервера по stdio.
+4. Для AI-проверки задать `OPENAI_API_KEY` и подключить `mcp/server.js` к MCP-клиенту.
 
 Подробности находятся в `mcp/README.md`.

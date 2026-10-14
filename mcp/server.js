@@ -1,56 +1,44 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { chromium } from 'playwright';
 import OpenAI from 'openai';
 import { z } from 'zod';
+import { collectReport, listPsychologists, getFreeSlots, bookSlot, listBookings } from './tools.js';
 
 const server = new McpServer({
   name: 'healme-ai-tester',
-  version: '1.0.0'
+  version: '2.0.0'
 });
 
 const defaultUrl = process.env.HEALME_URL || 'http://127.0.0.1:5500/';
+const urlArg = { url: z.string().url().optional().describe('Адрес HEALME, по умолчанию ' + defaultUrl) };
+const json = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
+const safe = fn => fn().catch(e => ({ ok: false, error: String((e && e.message) || e) }));
 
-async function collectReport(url) {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  const consoleErrors = [];
-  const pageErrors = [];
-
-  page.on('console', msg => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
-  });
-  page.on('pageerror', error => pageErrors.push(error.message));
-
-  const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-  const title = await page.title();
-  const links = await page.locator('a').evaluateAll(items =>
-    items.slice(0, 100).map(a => ({ text: a.textContent.trim(), href: a.getAttribute('href') }))
-  );
-
-  const report = {
-    url,
-    httpStatus: response?.status() ?? null,
-    title,
-    consoleErrors,
-    pageErrors,
-    links,
-    serviceWorker: await page.evaluate(() => !!navigator.serviceWorker?.controller),
-    sharedWorker: await page.evaluate(() => 'SharedWorker' in window)
-  };
-
-  await browser.close();
-  return report;
-}
+/* ---------- диагностика ---------- */
 
 server.tool(
   'smoke_test',
   'Открывает HEALME в браузере и возвращает технический отчёт для проверки проекта.',
-  { url: z.string().url().optional() },
+  urlArg,
+  ({ url }) => safe(() => collectReport(url)).then(json)
+);
+
+server.tool(
+  'check_workers',
+  'Проверяет наличие ServiceWorker и SharedWorker в HEALME.',
+  urlArg,
   async ({ url = defaultUrl }) => {
     const report = await collectReport(url);
     return {
-      content: [{ type: 'text', text: JSON.stringify(report, null, 2) }]
+      content: [{
+        type: 'text',
+        text: [
+          `ServiceWorker: ${report.serviceWorker ? 'обнаружен' : 'не обнаружен'}`,
+          `SharedWorker API: ${report.sharedWorker ? 'доступен' : 'не доступен'}`,
+          `HTTP: ${report.httpStatus}`,
+          report.consoleErrors.length ? `Ошибки консоли:\n${report.consoleErrors.join('\n')}` : 'Ошибок консоли не обнаружено.'
+        ].join('\n')
+      }]
     };
   }
 );
@@ -59,7 +47,7 @@ server.tool(
   'ai_test',
   'Запускает браузерную проверку HEALME и просит нейросеть найти потенциальные ошибки и предложить тест-кейсы.',
   {
-    url: z.string().url().optional(),
+    url: urlArg.url,
     task: z.string().optional()
   },
   async ({ url = defaultUrl, task = 'Проверь приложение как QA-инженер: найди функциональные и технические риски и составь приоритетный список тестов.' }) => {
@@ -69,7 +57,7 @@ server.tool(
       return {
         content: [{
           type: 'text',
-          text: 'OPENAI_API_KEY не задан. Браузерная проверка выполнена, но AI-анализ недоступен.\\n\\n' +
+          text: 'OPENAI_API_KEY не задан. Браузерная проверка выполнена, но AI-анализ недоступен.\n\n' +
             JSON.stringify(report, null, 2)
         }]
       };
@@ -86,7 +74,7 @@ server.tool(
         },
         {
           role: 'user',
-          content: `${task}\\n\\nТехнический отчёт HEALME:\\n${JSON.stringify(report, null, 2)}`
+          content: `${task}\n\nТехнический отчёт HEALME:\n${JSON.stringify(report, null, 2)}`
         }
       ]
     });
@@ -100,24 +88,46 @@ server.tool(
   }
 );
 
+/* ---------- бронирование слотов ---------- */
+
 server.tool(
-  'check_workers',
-  'Проверяет наличие ServiceWorker и SharedWorker в HEALME.',
-  { url: z.string().url().optional() },
-  async ({ url = defaultUrl }) => {
-    const report = await collectReport(url);
-    return {
-      content: [{
-        type: 'text',
-        text: [
-          `ServiceWorker: ${report.serviceWorker ? 'обнаружен' : 'не обнаружен'}`,
-          `SharedWorker API: ${report.sharedWorker ? 'доступен' : 'не доступен'}`,
-          `HTTP: ${report.httpStatus}`,
-          report.consoleErrors.length ? `Ошибки консоли:\\n${report.consoleErrors.join('\\n')}` : 'Ошибок консоли не обнаружено.'
-        ].join('\\n')
-      }]
-    };
-  }
+  'list_psychologists',
+  'Возвращает список психологов HEALME: id, имя, специализация, цена, формат и рейтинг.',
+  urlArg,
+  ({ url }) => safe(() => listPsychologists(url)).then(json)
+);
+
+server.tool(
+  'get_free_slots',
+  'Возвращает свободные слоты у психолога HEALME на ближайшие 14 дней (данные реального интерфейса записи).',
+  {
+    psychologist: z.string().describe('id или имя психолога, например maria или «Мария Лебедева»'),
+    ...urlArg
+  },
+  ({ psychologist, url }) => safe(() => getFreeSlots({ psychologist, url })).then(json)
+);
+
+server.tool(
+  'book_slot',
+  'Бронирует слот у психолога в HEALME через реальный интерфейс приложения: выбирает день и время, заполняет форму и подтверждает запись. Бронь сохраняется в IndexedDB.',
+  {
+    psychologist: z.string().describe('id или имя психолога, например maria'),
+    name: z.string().describe('Имя клиента (минимум 2 символа)'),
+    email: z.string().describe('Email клиента в формате name@mail.ru'),
+    day: z.string().optional().describe('Дата в формате YYYY-MM-DD; если не указана — берётся ближайший день со свободными слотами'),
+    time: z.string().optional().describe('Время в формате ЧЧ:ММ; если не указано — первый свободный слот выбранного дня'),
+    comment: z.string().optional().describe('Необязательный комментарий к записи'),
+    ...urlArg
+  },
+  ({ psychologist, name, email, day, time, comment, url }) =>
+    safe(() => bookSlot({ psychologist, name, email, day, time, comment, url })).then(json)
+);
+
+server.tool(
+  'list_bookings',
+  'Возвращает все записи клиента из IndexedDB HEALME: психолог, дата, время, статус, отзыв.',
+  urlArg,
+  ({ url }) => safe(() => listBookings({ url })).then(json)
 );
 
 const transport = new StdioServerTransport();

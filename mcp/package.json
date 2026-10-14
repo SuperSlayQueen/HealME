@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP-сервер для AI-тестирования HEALME",
+  "description": "MCP-сервер для AI-тестирования и бронирования слотов HEALME",
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/smoke.js"
+    "test": "node tests/smoke.js && node tests/booking.js && node tests/mcp.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
