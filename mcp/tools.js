@@ -37,10 +37,18 @@ function getContext() {
 }
 
 // Постоянный контекст не допускает параллельного запуска на одной папке профиля,
-// поэтому все обращения к браузеру выстраиваются в очередь.
+// поэтому все обращения к браузеру выстраиваются в очередь. Контекст закрывается
+// после каждого вызова: профиль свободен между вызовами, и его может занять,
+// например, видимое окно `npm run show` для демонстрации брони.
 function withPage(url, fn, before) {
   const run = queue.then(async () => {
-    const context = await getContext();
+    let context;
+    try {
+      context = await getContext();
+    } catch (e) {
+      contextPromise = null; // неудачный запуск не должен кэшироваться
+      throw e;
+    }
     const page = await context.newPage();
     try {
       if (before) before(page);
@@ -49,7 +57,9 @@ function withPage(url, fn, before) {
       await page.waitForFunction(() => document.querySelector('#app')?.children.length > 0, null, { timeout: 15000 });
       return await fn(page, response);
     } finally {
-      await page.close();
+      await page.close().catch(() => {});
+      contextPromise = null;
+      await context.close().catch(() => {});
     }
   });
   queue = run.then(() => {}, () => {});

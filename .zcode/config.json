@@ -1,0 +1,13 @@
+{
+  "mcp": {
+    "servers": {
+      "healme-ai-tester": {
+        "command": "node",
+        "args": ["C:/Users/Ardor/Desktop/HealME_with_MCP/HealME/mcp/server.js"],
+        "env": {
+          "HEALME_URL": "http://127.0.0.1:5500/"
+        }
+      }
+    }
+  }
+}
