@@ -6,6 +6,7 @@
   "description": "MCP-сервер для AI-тестирования и бронирования слотов HEALME",
   "scripts": {
     "start": "node server.js",
+    "book": "node book.mjs",
     "test": "node tests/smoke.js && node tests/booking.js && node tests/mcp.js"
   },
   "dependencies": {
